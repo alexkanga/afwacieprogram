@@ -1,0 +1,501 @@
+// AfWASA Congress Program Manager - Prisma Schema
+// ================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  SUPER_ADMIN
+  PROGRAM_ADMIN
+  CONTENT_EDITOR
+  PUBLIC_USER
+}
+
+enum CongressStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PublicationStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  HIDDEN
+}
+
+enum SessionRoomMode {
+  SINGLE_ROOM
+  MULTI_ROOM
+  ALL_ROOMS
+  NO_ROOM
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ExportFormat {
+  EXCEL_DATA
+  EXCEL_FORMATTED
+  PDF
+  WORD
+}
+
+enum PersonSessionRole {
+  SPEAKER
+  CHAIR
+  MODERATOR
+  PANELIST
+  FACILITATOR
+  ORGANIZER
+  PRESENTER
+}
+
+enum OrganizationType {
+  GOVERNMENT
+  NGO
+  PRIVATE_COMPANY
+  INTERNATIONAL_ORG
+  RESEARCH_INSTITUTE
+  UNIVERSITY
+  CONSULTANCY
+  UTILITY
+  OTHER
+}
+
+// ============================================
+// USER & AUTHENTICATION
+// ============================================
+
+model User {
+  id            String      @id @default(cuid())
+  email         String      @unique
+  name          String?
+  passwordHash  String?
+  role          UserRole    @default(PUBLIC_USER)
+  isActive      Boolean     @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  auditLogs     AuditLog[]
+  importJobs    ImportJob[]
+  exportJobs    ExportJob[]
+
+  @@index([email])
+  @@index([role])
+}
+
+// ============================================
+// CONGRESS & EVENT MANAGEMENT
+// ============================================
+
+model Congress {
+  id              String          @id @default(cuid())
+  title           String
+  shortName       String?
+  year            Int
+  startDate       DateTime
+  endDate         DateTime
+  city            String?
+  country         String?
+  venueName       String?
+  description     String?
+  timezone        String          @default("Africa/Abidjan")
+  status          CongressStatus  @default(DRAFT)
+  defaultLanguage String          @default("en")
+  logoUrl         String?
+  primaryColor    String?
+  secondaryColor  String?
+  publicSlug      String?         @unique
+  isCurrent       Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  venues          Venue[]
+  programDays     ProgramDay[]
+  sessions        Session[]
+  tracks          Track[]
+  sessionTypes    SessionType[]
+  importJobs      ImportJob[]
+  exportJobs      ExportJob[]
+
+  @@index([year])
+  @@index([status])
+  @@index([publicSlug])
+}
+
+model Venue {
+  id          String   @id @default(cuid())
+  congressId  String
+  name        String
+  code        String?
+  address     String?
+  city        String?
+  country     String?
+  isPrimary   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  congress    Congress @relation(fields: [congressId], references: [id], onDelete: Cascade)
+  rooms       Room[]
+
+  @@unique([congressId, code])
+  @@index([congressId])
+}
+
+model Room {
+  id            String   @id @default(cuid())
+  venueId       String
+  name          String
+  code          String?
+  capacity      Int?
+  floor         String?
+  displayOrder  Int      @default(0)
+  isPlenary     Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  color         String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  venue         Venue           @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  sessionRooms  SessionRoom[]
+
+  @@unique([venueId, code])
+  @@index([venueId])
+  @@index([displayOrder])
+}
+
+// ============================================
+// PROGRAM STRUCTURE
+// ============================================
+
+model ProgramDay {
+  id          String   @id @default(cuid())
+  congressId  String
+  label       String
+  date        DateTime
+  order       Int      @default(0)
+  isPublished Boolean  @default(false)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  congress    Congress  @relation(fields: [congressId], references: [id], onDelete: Cascade)
+  sessions    Session[]
+
+  @@unique([congressId, date])
+  @@index([congressId])
+  @@index([order])
+}
+
+model SessionType {
+  id                  String   @id @default(cuid())
+  congressId          String?
+  name                String
+  code                String
+  color               String?
+  textColor           String?
+  icon                String?
+  isSystem            Boolean  @default(false)
+  affectsPublicAgenda Boolean  @default(true)
+  displayOrder        Int      @default(0)
+  description         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relations
+  congress            Congress?  @relation(fields: [congressId], references: [id])
+  sessions            Session[]
+
+  @@unique([code])
+  @@index([code])
+  @@index([displayOrder])
+}
+
+model Track {
+  id            String   @id @default(cuid())
+  congressId    String
+  name          String
+  code          String?
+  color         String?
+  textColor     String?
+  description   String?
+  displayOrder  Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  congress      Congress  @relation(fields: [congressId], references: [id], onDelete: Cascade)
+  sessions      Session[]
+
+  @@unique([congressId, code])
+  @@index([congressId])
+  @@index([displayOrder])
+}
+
+// ============================================
+// ORGANIZATIONS & PERSONS
+// ============================================
+
+model Organization {
+  id          String           @id @default(cuid())
+  name        String
+  acronym     String?
+  country     String?
+  type        OrganizationType @default(OTHER)
+  website     String?
+  logoUrl     String?
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  persons     Person[]
+
+  @@index([name])
+  @@index([acronym])
+  @@index([country])
+}
+
+model Person {
+  id             String        @id @default(cuid())
+  firstName      String
+  lastName       String
+  displayName    String?
+  title          String?       // Professional title (Dr., Prof., etc.)
+  gender         String?
+  email          String?
+  phone          String?
+  country        String?
+  organizationId String?
+  bio            String?
+  photoUrl       String?
+  linkedInUrl    String?
+  twitterHandle  String?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  // Relations
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  sessionPersons SessionPerson[]
+
+  @@index([firstName, lastName])
+  @@index([email])
+  @@index([organizationId])
+}
+
+// ============================================
+// SESSIONS
+// ============================================
+
+model Session {
+  id                  String            @id @default(cuid())
+  congressId          String
+  dayId               String
+  title               String
+  subtitle            String?
+  description         String?
+  sessionTypeId       String?
+  trackId             String?
+  startTime           String            // HH:mm format
+  endTime             String            // HH:mm format
+  startDateTime       DateTime?
+  endDateTime         DateTime?
+  roomDisplayMode     SessionRoomMode   @default(SINGLE_ROOM)
+  isGlobalEvent       Boolean           @default(false)
+  colorOverride       String?
+  textColorOverride   String?
+  organizerText       String?
+  notes               String?           // Internal notes
+  publicationStatus   PublicationStatus @default(DRAFT)
+  sourceImportId      String?
+  externalReference   String?
+  displayOrder        Int               @default(0)
+  sessionCode         String?
+  isCancelled         Boolean           @default(false)
+  cancellationReason  String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  // Relations
+  congress            Congress          @relation(fields: [congressId], references: [id], onDelete: Cascade)
+  day                 ProgramDay        @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  sessionType         SessionType?      @relation(fields: [sessionTypeId], references: [id])
+  track               Track?            @relation(fields: [trackId], references: [id])
+  sessionRooms        SessionRoom[]
+  sessionPersons      SessionPerson[]
+
+  @@index([congressId])
+  @@index([dayId])
+  @@index([sessionTypeId])
+  @@index([trackId])
+  @@index([publicationStatus])
+  @@index([startDateTime])
+}
+
+model SessionRoom {
+  id          String   @id @default(cuid())
+  sessionId   String
+  roomId      String
+  spanOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  room        Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, roomId])
+  @@index([sessionId])
+  @@index([roomId])
+}
+
+model SessionPerson {
+  id          String            @id @default(cuid())
+  sessionId   String
+  personId    String
+  role        PersonSessionRole @default(SPEAKER)
+  sortOrder   Int               @default(0)
+  isConfirmed Boolean           @default(false)
+  notes       String?
+  createdAt   DateTime          @default(now())
+
+  // Relations
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  person      Person   @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, personId, role])
+  @@index([sessionId])
+  @@index([personId])
+  @@index([role])
+}
+
+// ============================================
+// IMPORT / EXPORT
+// ============================================
+
+model ImportJob {
+  id              String       @id @default(cuid())
+  congressId      String
+  userId          String
+  fileName        String
+  fileSize        Int?
+  status          ImportStatus @default(PENDING)
+  rowCount        Int          @default(0)
+  successCount    Int          @default(0)
+  errorCount      Int          @default(0)
+  warnings        String?      // JSON array of warnings
+  errors          String?      // JSON array of errors
+  mapping         String?      // JSON object for column mapping
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  congress        Congress     @relation(fields: [congressId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+
+  @@index([congressId])
+  @@index([userId])
+  @@index([status])
+}
+
+model ExportJob {
+  id              String       @id @default(cuid())
+  congressId      String
+  userId          String
+  format          ExportFormat
+  status          ExportStatus @default(PENDING)
+  fileName        String?
+  filePath        String?
+  fileSize        Int?
+  options         String?      // JSON object for export options
+  startedAt       DateTime?
+  completedAt     DateTime?
+  error           String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  congress        Congress     @relation(fields: [congressId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id])
+
+  @@index([congressId])
+  @@index([userId])
+  @@index([status])
+}
+
+// ============================================
+// AUDIT LOG
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  entityType String
+  entityId   String
+  action     String   // CREATE, UPDATE, DELETE, PUBLISH, IMPORT, EXPORT
+  before     String?  // JSON snapshot before
+  after      String?  // JSON snapshot after
+  metadata   String?  // JSON for additional info
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  // Relations
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================
+// SETTINGS & REFERENCES
+// ============================================
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String   // JSON value
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
+
+// Default session types to seed
+// These will be created as system types available for all congresses
